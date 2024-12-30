@@ -1,15 +1,16 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from nltk.translate.bleu_score import sentence_bleu
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 384 # what is the maximum context length for predictions?
-max_iters = 400
+max_iters = 5
 eval_interval = 200
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-eval_iters = 100
+eval_iters = 5
 n_embd = 120
 n_head = 6
 n_layer = 2
@@ -31,10 +32,10 @@ print(f'Text size (chars): {len(text)}')
 print(f'Text size (words): {len(text.split())}')
 print(f'Unique words: {len(set(text.split()))}')
 
-with open('input_childSpeech_testSet.txt', 'r', encoding='utf-8') as f:
+with open('inputMelodies.txt', 'r', encoding='utf-8') as f:
     child_speech_test_text = f.read()
 
-with open('input_shakespeare.txt', 'r', encoding='utf-8') as f:
+with open('inputMelodiesAugmented.txt', 'r', encoding='utf-8') as f:
     shakespeare_test_text = f.read()
 
 all_text = text + child_speech_test_text + shakespeare_test_text
@@ -253,45 +254,67 @@ print(f"Child Speech Test Data: {child_speech_test_data.shape}")
 print(f"Shakespeare Test Data: {shakespeare_test_data.shape}")
 
 
-# Function to calculate test loss
 @torch.no_grad()
-def calculate_test_loss(test_data):
+def calculate_test_loss_and_perplexity(test_data):
     model.eval()
     total_loss = 0
     batch_count = 0
 
     for i in range(0, len(test_data) - block_size, block_size):
-        # Get a batch of data
         x = test_data[i:i + block_size].unsqueeze(0).to(device)
         y = test_data[i + 1:i + block_size + 1].unsqueeze(0).to(device)
 
-        # Evaluate the model
         _, loss = model(x, y)
         total_loss += loss.item()
         batch_count += 1
 
     average_loss = total_loss / batch_count
+    perplexity  = torch.exp(loss)
     model.train()
-    return average_loss
+    return average_loss, perplexity
 
 
-def dummy_model_loss(test_data):
-    vocab_size = len(chars)
-    dummy_loss = -torch.log(torch.tensor(1 / vocab_size)).item()  # Uniform probabilities
-    return dummy_loss
+def compute_bleu_score(reference_melodies, generated_melodies):
+    bleu_scores = []
+    for ref, gen in zip(reference_melodies, generated_melodies):
+        ref_seq = decode(ref).split()  # Convert reference to tokens
+        gen_seq = decode(gen).split()  # Convert generated to tokens
 
-print("Evaluating on input_childSpeech_testSet.txt")
-child_speech_test_loss = calculate_test_loss(child_speech_test_data)
-print(f"Child Speech Test Loss: {child_speech_test_loss:.4f}")
+        # Check for empty sequences after decoding
+        if not ref_seq or not gen_seq:
+            print("Warning: Empty sequence in reference or generated data.")
+            continue
 
-print("Evaluating on input_shakespeare.txt")
-shakespeare_test_loss = calculate_test_loss(shakespeare_test_data)
-print(f"Shakespeare Test Loss: {shakespeare_test_loss:.4f}")
+        # Compute BLEU score
+        score = sentence_bleu([ref_seq], gen_seq)
+        bleu_scores.append(score)
+
+    return sum(bleu_scores) / len(bleu_scores) if bleu_scores else 0
+
+
+#def dummy_model_loss(test_data):
+#    vocab_size = len(chars)
+#    dummy_loss = -torch.log(torch.tensor(1 / vocab_size)).item()  # Uniform probabilities
+#    perplexity = torch.exp(dummy_loss)
+#    return dummy_loss, perplexity
+
+print("Evaluating on inputMelodies.txt")
+InputMelody_test_loss, InputMelody_test_perplexity = calculate_test_loss_and_perplexity(child_speech_test_data)
+print(f"Input Melodies Test Loss and perplexity -\nLoss: {InputMelody_test_loss:.4f}\nPerplexity: {InputMelody_test_perplexity:.4f}")
+
+#print("Evaluating on inputMelodiesAugmented.txt")
+#InputMelody_test_loss, InputMelody_test_perplexity = calculate_test_loss_and_perplexity(shakespeare_test_data)
+#print(f"Augmented Melodies Test Loss and perplexity -\nLoss: {InputMelody_test_loss:.4f}\nPerplexity: {InputMelody_test_perplexity:.4f}")
 
 # Comparison with dummy model
 print("\nComparing with a dummy model...")
 
-dummy_loss = dummy_model_loss(child_speech_test_data)
-print(f"Dummy Model child speech Loss: {dummy_loss:.4f}")
-dummy_loss = dummy_model_loss(shakespeare_test_data)
-print(f"Dummy Model shakespeare Loss: {dummy_loss:.4f}")
+#dummy_loss = dummy_model_loss(child_speech_test_data)
+#print(f"Dummy Model child speech Loss: {dummy_loss:.4f}")
+#dummy_loss = dummy_model_loss(shakespeare_test_data)
+#print(f"Dummy Model shakespeare Loss: {dummy_loss:.4f}")
+
+generated = model.generate(context, max_new_tokens=500)
+generated_melodies = [generated]  # Add multiple samples if needed
+bleu_score = compute_bleu_score([val_data[:len(generated)]], generated_melodies)
+print(f"BLEU Score: {bleu_score:.4f}")
