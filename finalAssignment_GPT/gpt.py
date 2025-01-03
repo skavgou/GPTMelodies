@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 384 # what is the maximum context length for predictions?
-max_iters = 5
+max_iters = 10
 eval_interval = 200
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -273,23 +273,12 @@ def calculate_test_loss_and_perplexity(test_data):
     model.train()
     return average_loss, perplexity
 
+def calculate_bleu(reference_text, generated_text):
+    reference_tokens = [reference_text[:500].split()]
+    generated_tokens = generated_text.split()
+    smoothie = SmoothingFunction().method1
+    return sentence_bleu(reference_tokens, generated_tokens, smoothing_function=smoothie)
 
-def compute_bleu_score(reference_melodies, generated_melodies):
-    bleu_scores = []
-    for ref, gen in zip(reference_melodies, generated_melodies):
-        ref_seq = decode(ref).split()  # Convert reference to tokens
-        gen_seq = decode(gen).split()  # Convert generated to tokens
-
-        # Check for empty sequences after decoding
-        if not ref_seq or not gen_seq:
-            print("Warning: Empty sequence in reference or generated data.")
-            continue
-
-        # Compute BLEU score
-        score = sentence_bleu([ref_seq], gen_seq)
-        bleu_scores.append(score)
-
-    return sum(bleu_scores) / len(bleu_scores) if bleu_scores else 0
 
 
 #def dummy_model_loss(test_data):
@@ -307,14 +296,38 @@ print(f"Input Melodies Test Loss and perplexity -\nLoss: {InputMelody_test_loss:
 #print(f"Augmented Melodies Test Loss and perplexity -\nLoss: {InputMelody_test_loss:.4f}\nPerplexity: {InputMelody_test_perplexity:.4f}")
 
 # Comparison with dummy model
-print("\nComparing with a dummy model...")
+#print("\nComparing with a dummy model...")
+
+context = torch.zeros((1, 1), dtype=torch.long, device=device)
+generated_sequence = decode(model.generate(context, max_new_tokens=500)[0].tolist())
+
+print(generated_sequence)
+print(shakespeare_test_text)
+bleu_score = calculate_bleu(shakespeare_test_text, generated_sequence)
+print(f"Generated Text: {generated_sequence}")
+print(f"BLEU Score: {bleu_score:.4f}")
 
 #dummy_loss = dummy_model_loss(child_speech_test_data)
 #print(f"Dummy Model child speech Loss: {dummy_loss:.4f}")
 #dummy_loss = dummy_model_loss(shakespeare_test_data)
 #print(f"Dummy Model shakespeare Loss: {dummy_loss:.4f}")
 
-generated = model.generate(context, max_new_tokens=500)
-generated_melodies = [generated]  # Add multiple samples if needed
-bleu_score = compute_bleu_score([val_data[:len(generated)]], generated_melodies)
-print(f"BLEU Score: {bleu_score:.4f}")
+def test_bleu_function():
+    reference_text = "R R R R R R f g f F d c g a g f a a a g f g f d d"
+    generated_text = "R R R R f g f F d c g a g f a g f g f d d"
+
+    bleu_score = calculate_bleu(reference_text, generated_text)
+    print(f"Reference: {reference_text}")
+    print(f"Generated: {generated_text}")
+    print(f"BLEU Score: {bleu_score:.4f}")
+
+# Run the test
+test_bleu_function()
+
+def debug_bleu(reference_text, generated_text):
+    reference_tokens = [reference_text.split()]
+    generated_tokens = generated_text.split()
+    print("Reference Tokens:", reference_tokens)
+    print("Generated Tokens:", generated_tokens)
+
+debug_bleu(shakespeare_test_text, generated_sequence)
